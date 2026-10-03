@@ -12,6 +12,7 @@
     "node": ">=20"
   },
   "scripts": {
+    "test": "node --test report-regression-test.mjs",
     "selftest": "node dsh-agent.mjs selftest",
     "list": "node dsh-agent.mjs list",
     "reports": "node dsh-agent.mjs reports",

@@ -203,7 +203,7 @@ export function stopOwnHost() {
 }
 
 /** Gọi 1 endpoint RPC. args là object có ĐÚNG tên tham số của hàm phía host. */
-export async function call(method, args = {}) {
+export async function call(method, args = {}, retried = false) {
   const rt = await ready();
   const body = {
     type: 'client-request',
@@ -217,9 +217,11 @@ export async function call(method, args = {}) {
     body: JSON.stringify(body),
   });
   if (res.status === 401) { // cookie hỏng -> tìm lại từ đầu đúng 1 lần
+    await res.body?.cancel();
     RUNTIME = null;
+    if (retried) throw new Error('HTTP 401: DSH authentication failed after retry');
     await ready();
-    return call(method, args);
+    return call(method, args, true);
   }
   const text = await res.text();
   if (!res.ok) throw new Error(`HTTP ${res.status}: ${text.slice(0, 300)}`);
@@ -448,12 +450,16 @@ export function envelope(r) {
  * Watermark `reportedSeq` nằm trong index nên KHÔNG cần tiến trình nền: cha hỏi
  * lúc nào thì tính lúc đó (Codex hook gọi vào đây mỗi lần mở turn).
  */
-export async function reports({ ids = null, markRead = true } = {}) {
+export async function reports({ ids = null, markRead = true, limit = Infinity } = {}) {
+  if (limit !== Infinity && (!Number.isInteger(limit) || limit < 0)) {
+    throw new Error('report limit must be a non-negative integer');
+  }
   const idx = readIndex();
   if (Object.keys(idx).length === 0) return []; // chưa giao việc cho ai -> khỏi gọi host
   const wanted = ids ? ids.map((i) => resolve(i)) : null;
   const out = [];
   for (const [sessionId, info] of Object.entries(idx)) {
+    if (out.length >= limit) break;
     if (wanted && !wanted.includes(sessionId)) continue;
     // Không dùng session/list: chậm (~2s) và không cần. Session đã archive/xoá thì
     // readPage ném `session/not-found` -> coi như không còn gì để báo.
@@ -464,12 +470,17 @@ export async function reports({ ids = null, markRead = true } = {}) {
       if (r?.type === 'turn/end') lastEnd = r;
     }
     if (lastEnd === null || lastEnd.seq <= (info.reportedSeq ?? 0)) continue;
+    // Only use messages from the completed turn. A later turn can already be
+    // running, and an interrupted turn must not inherit an older answer.
+    const endIndex = records.findLastIndex((rec) => (rec?.event ?? rec) === lastEnd);
+    let startIndex = endIndex - 1;
+    while (startIndex >= 0 && (records[startIndex]?.event ?? records[startIndex])?.type !== 'turn/end') startIndex -= 1;
     out.push({
       id: sessionId,
       label: info.label ?? null,
       turn: lastEnd.data?.turn ?? null,
       reason: lastEnd.data?.reason?.kind ?? null,
-      answer: answerFrom(records),
+      answer: answerFrom(records.slice(startIndex + 1, endIndex)),
     });
     if (markRead) idx[sessionId] = { ...info, reportedSeq: lastEnd.seq, reportedAt: new Date().toISOString() };
   }
