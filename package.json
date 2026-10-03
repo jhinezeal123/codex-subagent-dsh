@@ -1,9 +1,9 @@
 {
   "name": "codex-subagent-dsh",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
-  "description": "Adapter biến DSH session thành 'subagent' cho Codex: MCP server (stdio) + CLI, bắt chước đúng bộ tool multi_agent native của Codex (spawn/followup/message/wait/interrupt/list).",
+  "description": "Adapter biến DSH session thành 'subagent' cho Codex: MCP server (stdio) + CLI + hook kênh ngược, bắt chước đúng bộ tool multi_agent native của Codex (spawn/followup/message/wait/interrupt/list).",
   "bin": {
     "dsh-agent": "dsh-agent.mjs",
     "dsh-agent-mcp": "dsh-agent-mcp.mjs"
@@ -14,7 +14,11 @@
   "scripts": {
     "selftest": "node dsh-agent.mjs selftest",
     "list": "node dsh-agent.mjs list",
+    "reports": "node dsh-agent.mjs reports",
+    "wait": "node dsh-agent.mjs wait",
     "mcp": "node dsh-agent-mcp.mjs",
+    "test:mcp": "node mcp-test.mjs",
+    "test:hook": "node hook-test.mjs",
     "test:e2e": "node web-e2e-test.mjs",
     "test:ops": "node web-ops-test.mjs",
     "test:steer": "node web-steer-test.mjs",
@@ -24,6 +28,8 @@
     "dsh-agent.mjs",
     "dsh-agent-mcp.mjs",
     "dsh-web.mjs",
+    "hook-reports.mjs",
+    "hooks.example.json",
     "README.md"
   ]
 }

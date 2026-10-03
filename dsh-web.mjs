@@ -69,16 +69,27 @@ function candidateBases() {
   return [...new Set(list.map((b) => b.replace(/\/+$/, '')))];
 }
 
-/** 200 = host sống và cookie dùng được; 401 = host sống nhưng cookie sai; 0 = không có host. */
+/**
+ * 200 = host sống và cookie dùng được; 401 = host sống nhưng cookie sai; 0 = không có host.
+ *
+ * Dùng `session/page` chứ KHÔNG dùng `session/list`: list phải quét toàn workspace
+ * (đo được 0.5-5s với 158 session), còn page ~75ms. Session id cố tình không tồn
+ * tại — host vẫn trả HTTP 200 kèm `ok:false`, đủ để biết cookie hợp lệ.
+ */
 async function probe(base, cookie) {
   try {
-    const res = await fetch(`${base}/api/session/list`, {
+    const res = await fetch(`${base}/api/session/page`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', ...(cookie ? { cookie } : {}) },
-      body: JSON.stringify({ type: 'client-request', rpcId: 'probe', method: 'session/list', payload: { args: { _request: {} } } }),
+      body: JSON.stringify({
+        type: 'client-request',
+        rpcId: 'probe',
+        method: 'session/page',
+        payload: { args: { request: { address: { kind: 'session', sessionId: 'session-probe' }, throughSeq: 0, maxMessages: 1 } } },
+      }),
       signal: AbortSignal.timeout(5000),
     });
-    return res.status;
+    return res.status === 401 ? 401 : (res.status < 500 ? 200 : res.status);
   } catch { return 0; }
 }
 
@@ -141,12 +152,17 @@ async function startOwnHost() {
 }
 
 /** Tìm host dùng được (mặc định có tự dựng host nếu chưa có gì). */
-export async function ready({ autoStart = true } = {}) {
+export async function ready({ autoStart = true, fast = false } = {}) {
   if (RUNTIME) return RUNTIME;
   const jar = readCookieJar();
   for (const base of candidateBases()) { // 1. cookie đã lưu
     const c = jar[authorityOf(base)];
-    if (c && await probe(base, c) === 200) { RUNTIME = { base, cookie: c }; return RUNTIME; }
+    if (!c) continue;
+    // fast: TIN cookie đang có, khỏi probe. Probe = gọi `session/list`, mà host
+    // quét 158 session mất ~1.2s -> quá đắt cho hook (ngân sách vài giây).
+    // Cookie hỏng thì `call()` gặp 401 và tự chạy lại ready() đầy đủ đúng 1 lần.
+    if (fast) { RUNTIME = { base, cookie: c }; return RUNTIME; }
+    if (await probe(base, c) === 200) { RUNTIME = { base, cookie: c }; return RUNTIME; }
   }
   const token = (process.env.DSH_WEB_TOKEN || '').trim() || readTokenFile(); // 2. token -> cookie
   const tokens = [token, readState().token].filter(Boolean);
@@ -235,9 +251,9 @@ function writeIndex(obj) {
 }
 
 /** Host có dùng được không (dùng để CLI tự chọn đường web hay headless). */
-export async function up({ autoStart = true } = {}) {
+export async function up({ autoStart = true, fast = false } = {}) {
   try {
-    await ready({ autoStart });
+    await ready({ autoStart, fast });
     return true;
   } catch {
     return false;
@@ -305,13 +321,23 @@ export async function waitIdle(sessionId, timeoutMs = 3 * 60 * 60 * 1000, onTick
 const textOf = (content) => (Array.isArray(content) ? content.filter((p) => p?.type === 'text').map((p) => p.text).join(' ') : '');
 
 /** Đọc 1 trang lịch sử (message-aligned), mới nhất ở cuối. */
+/**
+ * Đọc trang record cuối của session. KHÔNG gọi `session/list` để lấy asOfSeq:
+ * list() phải quét toàn bộ workspace (~2s với 158 session), còn session/page chỉ
+ * ~30-70ms. Host tự trả cursor khi throughSeq vượt quá ("past cursor 2273") — dùng
+ * luôn con số đó thay vì đi hỏi list(). Session không tồn tại -> ném `session/not-found`.
+ */
 export async function readPage(sessionId, maxMessages = 30) {
-  const s = await one(sessionId);
-  const throughSeq = s?.projections?.asOfSeq ?? -1;
-  if (throughSeq < 0) return { records: [], hasMore: false };
-  return call('session/page', {
+  const body = (throughSeq) => ({
     request: { address: { kind: 'session', sessionId }, throughSeq, maxMessages: Math.max(1, maxMessages) },
   });
+  try {
+    return await call('session/page', body(Number.MAX_SAFE_INTEGER));
+  } catch (e) {
+    const m = /past cursor (\d+)/.exec(e?.message ?? '');
+    if (!m) throw e;
+    return call('session/page', body(Number(m[1])));
+  }
 }
 
 /** Câu trả lời cuối cùng trong 1 danh sách record (record bọc trong {event}). */
@@ -328,7 +354,7 @@ export function answerFrom(records) {
 
 /** Trả lời cuối cùng của agent (dùng cho --wait). */
 export async function lastAnswer(sessionId) {
-  const { records } = await readPage(sessionId, 30);
+  const { records } = await readPage(sessionId, 30).catch(() => ({ records: [] }));
   return answerFrom(records);
 }
 
@@ -388,6 +414,67 @@ export function entries() {
   return Object.entries(readIndex())
     .map(([sessionId, info]) => ({ sessionId, ...info }))
     .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
+}
+
+// ------------------------------------------------------------- báo cáo lên cha
+/**
+ * Nhận id HOẶC tên: model hay gọi tên thay vì id (native Codex cũng cho gọi
+ * `target` bằng canonical task name). Chấp nhận cả `/root/x`, `/dsh/x`, `x`.
+ * Không khớp gì thì trả nguyên input để host tự báo lỗi (đừng đoán bừa).
+ */
+export function resolve(target) {
+  if (!target) return target;
+  const idx = readIndex();
+  if (idx[target]) return target;
+  const want = String(target).toLowerCase().replace(/^\/(root|dsh)\//, '');
+  const hit = Object.entries(idx).find(([, i]) => String(i.label ?? '').toLowerCase() === want)
+    ?? Object.entries(idx).find(([, i]) => String(i.label ?? '').toLowerCase().startsWith(want));
+  return hit ? hit[0] : target;
+}
+
+/**
+ * Bọc 1 báo cáo theo ĐÚNG format mà Codex dùng cho sub-agent native của nó
+ * (`<multi_agent_role>`: "You will receive messages in the analysis channel in the
+ * form: Message Type / Task name / Sender / Payload"). Nhờ vậy model đọc báo cáo
+ * của ta bằng đúng phản xạ nó đã có, không phải học format mới.
+ */
+export function envelope(r) {
+  const payload = String(r.answer ?? '').trim() || '(khong co cau tra loi)';
+  return `Message Type: FINAL_ANSWER\nTask name: ${r.label || r.id}\nSender: ${r.id}\nPayload:\n${payload}`;
+}
+
+/**
+ * Báo cáo CHƯA ĐỌC: subagent đã kết thúc ít nhất 1 turn mới kể từ lần báo trước.
+ * Watermark `reportedSeq` nằm trong index nên KHÔNG cần tiến trình nền: cha hỏi
+ * lúc nào thì tính lúc đó (Codex hook gọi vào đây mỗi lần mở turn).
+ */
+export async function reports({ ids = null, markRead = true } = {}) {
+  const idx = readIndex();
+  if (Object.keys(idx).length === 0) return []; // chưa giao việc cho ai -> khỏi gọi host
+  const wanted = ids ? ids.map((i) => resolve(i)) : null;
+  const out = [];
+  for (const [sessionId, info] of Object.entries(idx)) {
+    if (wanted && !wanted.includes(sessionId)) continue;
+    // Không dùng session/list: chậm (~2s) và không cần. Session đã archive/xoá thì
+    // readPage ném `session/not-found` -> coi như không còn gì để báo.
+    const { records } = await readPage(sessionId, 80).catch(() => ({ records: [] }));
+    let lastEnd = null;
+    for (const rec of records) {
+      const r = rec?.event ?? rec;
+      if (r?.type === 'turn/end') lastEnd = r;
+    }
+    if (lastEnd === null || lastEnd.seq <= (info.reportedSeq ?? 0)) continue;
+    out.push({
+      id: sessionId,
+      label: info.label ?? null,
+      turn: lastEnd.data?.turn ?? null,
+      reason: lastEnd.data?.reason?.kind ?? null,
+      answer: answerFrom(records),
+    });
+    if (markRead) idx[sessionId] = { ...info, reportedSeq: lastEnd.seq, reportedAt: new Date().toISOString() };
+  }
+  if (markRead && out.length) writeIndex(idx);
+  return out;
 }
 
 // ------------------------------------------------------------------ CLI

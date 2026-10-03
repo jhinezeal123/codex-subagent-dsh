@@ -417,11 +417,12 @@ function selftest() {
  * (giữ hàng đợi), và mọi subagent HIỆN TRONG GUI để bạn xem/can thiệp bằng tay.
  */
 async function webMain(cmd, opts, web) {
-  const id = opts._[0];
+  // Nhận id HOẶC tên (label) — native Codex cũng cho gọi subagent bằng task name.
+  const id = opts._[0] ? web.resolve(opts._[0]) : opts._[0];
   const msg = opts._.slice(1).join(' ');
   // id kieu `s-xxxxxx` = subagent duong headless (khong phai session cua GUI):
   // van dung CLI nay duoc, chi la di duong cu.
-  if (id && !['new', 'list', 'selftest', 'host'].includes(cmd) && fs.existsSync(path.join(agentDir(id), 'meta.json'))) {
+  if (id && !['new', 'list', 'selftest', 'host', 'wait', 'reports'].includes(cmd) && fs.existsSync(path.join(agentDir(id), 'meta.json'))) {
     return headlessMain(cmd, opts);
   }
   switch (cmd) {
@@ -431,10 +432,22 @@ async function webMain(cmd, opts, web) {
       const cwd = path.resolve(opts.cwd || process.cwd());
       if (!fs.existsSync(cwd)) throw new Error(`cwd khong ton tai: ${cwd}`);
       const { sessionId } = await web.create(cwd);
-      web.remember(sessionId, { label: opts.label || task.slice(0, 60), cwd, kind: 'web' });
+      const label = opts.label || task.slice(0, 60);
+      web.remember(sessionId, { label, cwd, kind: 'web' });
       await web.prompt(sessionId, task, 'queue');
       if (opts.wait) return webWait(sessionId, web);
-      console.log(JSON.stringify({ id: sessionId, sessionId, status: 'running', cwd, transport: 'web' }, null, 2));
+      // agent_id/nickname/canonical_task_name/thread_id: đặt tên theo đúng bộ field
+      // mà spawn_agent native trả về, để model không phải học tên mới.
+      console.log(JSON.stringify({
+        id: sessionId,
+        agent_id: sessionId,
+        nickname: label,
+        canonical_task_name: `/dsh/${label}`,
+        thread_id: sessionId,
+        status: 'running',
+        cwd,
+        transport: 'web',
+      }, null, 2));
       return undefined;
     }
     case 'send': {
@@ -464,6 +477,21 @@ async function webMain(cmd, opts, web) {
       const r = await web.cancel(id);
       if (opts.wait) return webWait(id, web);
       console.log(JSON.stringify({ id, stopped: r?.accepted ?? true, transport: 'web' }, null, 2));
+      return undefined;
+    }
+    case 'wait': {
+      // Long-poll: chờ tới khi có báo cáo mới. Codex native cũng khuyên "prefer
+      // longer waits (minutes) to avoid busy polling" — đây là bản tương đương.
+      const targets = opts._.filter(Boolean);
+      const timeout = Number.isFinite(opts.timeout) ? opts.timeout : 120000;
+      return webWaitReports(targets, timeout, opts, web);
+    }
+    case 'reports': {
+      // Báo cáo chưa đọc. `--peek` = chỉ xem, không đánh dấu đã đọc.
+      const rows = await web.reports({ ids: opts._.length ? opts._ : null, markRead: opts.peek !== true });
+      if (opts.json) { console.log(JSON.stringify({ outcome: rows.length ? 'reported' : 'nothing-new', reports: rows }, null, 2)); return undefined; }
+      if (!rows.length) { console.log('(khong co bao cao moi)'); return undefined; }
+      console.log(rows.map((r) => web.envelope(r)).join('\n\n'));
       return undefined;
     }
     case 'history': {
@@ -565,8 +593,46 @@ async function webWait(sessionId, web) {
   return undefined;
 }
 
-function webSelftest(web) {
-  const assert = (c, m) => { if (!c) throw new Error(`FAIL: ${m}`); };
+/**
+ * Long-poll chờ báo cáo mới (backoff 1s→8s, có trần thời gian).
+ * Ba kết cục phân biệt rõ, không làm tròn thành "thành công":
+ *   reported      — có báo cáo, in ra theo envelope native
+ *   nothing-new   — không ai còn chạy và không có gì mới (chờ thêm là vô nghĩa)
+ *   unconfirmed   — hết trần thời gian, CHƯA xác nhận (exit 3, khác hẳn thất bại)
+ */
+async function webWaitReports(ids, timeoutMs, opts, web) {
+  const t0 = Date.now();
+  let delay = 1000;
+  const stillRunning = async () => {
+    const live = await web.list();
+    const tracked = ids.length ? ids : web.entries().map((e) => e.sessionId);
+    return live.some((s) => s.running === true && tracked.includes(s.sessionId));
+  };
+  for (;;) {
+    const rows = await web.reports({ ids: ids.length ? ids : null, markRead: true });
+    if (rows.length) {
+      if (opts.json) { console.log(JSON.stringify({ outcome: 'reported', reports: rows }, null, 2)); return undefined; }
+      console.log(rows.map((r) => web.envelope(r)).join('\n\n'));
+      return undefined;
+    }
+    if (Date.now() - t0 > 2000 && !(await stillRunning())) {
+      if (opts.json) { console.log(JSON.stringify({ outcome: 'nothing-new', waitedMs: Date.now() - t0, ids }, null, 2)); return undefined; }
+      console.log(`(khong co bao cao moi: khong con subagent nao dang chay — cho ${Math.round((Date.now() - t0) / 1000)}s)`);
+      return undefined;
+    }
+    if (Date.now() - t0 > timeoutMs) {
+      const payload = { outcome: 'unconfirmed', reason: 'wait_timeout', waitedMs: Date.now() - t0, ids };
+      process.exitCode = 3;
+      if (opts.json) { console.log(JSON.stringify(payload, null, 2)); return undefined; }
+      console.log(`(chua xac nhan: het ${Math.round(timeoutMs / 1000)}s ma chua co bao cao — subagent VAN CO THE dang chay)`);
+      return undefined;
+    }
+    await new Promise((r) => setTimeout(r, delay));
+    delay = Math.min(delay * 2, 8000);
+  }
+}
+
+function webSelftest(web) {  const assert = (c, m) => { if (!c) throw new Error(`FAIL: ${m}`); };
   const rec = (type, data) => ({ type, seq: 1, time: Date.now(), data });
   assert(web.renderRecord(rec('tool/call', { name: 'pwsh', arguments: '{"command":"ls"}' })) === 'tool: pwsh({"command":"ls"})', 'render tool/call');
   assert(web.renderRecord(rec('user/message', { content: [{ type: 'text', text: 'Current runtime context. blah' }] })) === null, 'bo message he thong');
@@ -611,8 +677,8 @@ async function main() {
   if (cmd === '__run') return cmdRun(process.argv[3], fs.readFileSync(0, 'utf8'));
   if (!cmd || cmd === 'help' || cmd === '--help') { process.stdout.write(USAGE); return undefined; }
   const opts = argParser({
-    bool: ['wait', 'raw', 'all', 'web', 'headless', 'steer'],
-    num: ['limit', 'offset'],
+    bool: ['wait', 'raw', 'all', 'web', 'headless', 'steer', 'json', 'peek'],
+    num: ['limit', 'offset', 'timeout'],
     str: ['cwd', 'label'],
   });
 
@@ -660,6 +726,8 @@ async function headlessMain(cmd, opts) {
     case 'history': return cmdHistory(opts);
     case 'list': return cmdList(opts);
     case 'status': return cmdStatus(opts);
+    case 'wait': case 'reports':
+      throw new Error(`${cmd} can web host (bao cao lay tu session cua GUI). Mo GUI / chay \`dsh-agent host start\` roi thu lai.`);
     case 'selftest': return selftest();
     default: throw new Error(`lenh la khong biet: ${cmd}\n\n${USAGE}`);
   }

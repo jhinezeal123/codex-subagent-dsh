@@ -1,0 +1,19 @@
+{
+  "description": "dsh-agent: day bao cao cua subagent DSH vao context cua Codex (kenh nguoc). Copy file nay thanh ~/.codex/hooks.json roi mo /hooks trong Codex de trust.",
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "matcher": null,
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"D:\\Documents\\codex_subagent_dsh\\hook-reports.mjs\"",
+            "commandWindows": "node \"D:\\Documents\\codex_subagent_dsh\\hook-reports.mjs\"",
+            "timeoutSec": 3,
+            "additionalContextLimit": 0
+          }
+        ]
+      }
+    ]
+  }
+}
