@@ -1,5 +1,5 @@
 {
-  "description": "dsh-agent: day bao cao cua subagent DSH vao context cua Codex (kenh nguoc). Copy file nay thanh ~/.codex/hooks.json roi mo /hooks trong Codex de trust.",
+  "description": "dsh-agent: day bao cao cua subagent DSH vao context cua Codex (kenh nguoc). Day chi la MAU de xem shape — dung `node hook-install.mjs` de sinh ban dung duong dan may ban, roi mo /hooks trong Codex de trust.",
   "hooks": {
     "UserPromptSubmit": [
       {
@@ -7,8 +7,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"D:\\Documents\\codex_subagent_dsh\\hook-reports.mjs\"",
-            "commandWindows": "node \"D:\\Documents\\codex_subagent_dsh\\hook-reports.mjs\"",
+            "command": "node \"<DUONG_DAN_TOI_REPO>\\hook-reports.mjs\"",
+            "commandWindows": "node \"<DUONG_DAN_TOI_REPO>\\hook-reports.mjs\"",
             "timeoutSec": 3,
             "additionalContextLimit": 0
           }

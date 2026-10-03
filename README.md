@@ -63,9 +63,17 @@ tool_timeout_sec = 900                      # 15 phút: đủ cho wait dài, tr�
 default_tools_approval_mode = "approve"     # không thì approval_policy="never" sẽ chặn tool call
 ```
 
-**2. Hook kênh ngược** — copy [`hooks.example.json`](hooks.example.json) thành `~/.codex/hooks.json`
-(hoặc dán vào `.codex/hooks.json` của project), rồi mở `/hooks` trong Codex để **trust** (hook chưa
-trust thì Codex không chạy; có `--dangerously-bypass-hook-trust` cho một lần).
+**2. Hook kênh ngược** — sinh file hook với đường dẫn đúng máy bạn, rồi **trust** nó (hook chưa trust
+thì Codex không chạy; có `--dangerously-bypass-hook-trust` cho một lần):
+
+```powershell
+node hook-install.mjs            # in ra JSON, KHÔNG ghi gì
+node hook-install.mjs --write    # ghi ~/.codex/hooks.json (tự backup bản cũ)
+node hook-install.mjs --project  # hoặc ghi <repo>/.codex/hooks.json
+```
+
+Sau đó mở Codex, gõ `/hooks` để trust. [`hooks.example.json`](hooks.example.json) là bản mẫu chỉ để
+xem shape ([`hook-install.mjs`](hook-install.mjs) sinh ra y hệt, chỉ khác đường dẫn tuyệt đối):
 
 ```json
 {
@@ -73,8 +81,8 @@ trust thì Codex không chạy; có `--dangerously-bypass-hook-trust` cho một 
     "UserPromptSubmit": [
       { "matcher": null,
         "hooks": [{ "type": "command",
-                    "command": "node \"D:\\Documents\\codex_subagent_dsh\\hook-reports.mjs\"",
-                    "commandWindows": "node \"D:\\Documents\\codex_subagent_dsh\\hook-reports.mjs\"",
+                    "command": "node \"<DUONG_DAN_TOI_REPO>\\hook-reports.mjs\"",
+                    "commandWindows": "node \"<DUONG_DAN_TOI_REPO>\\hook-reports.mjs\"",
                     "timeoutSec": 3, "additionalContextLimit": 0 }] }
     ]
   }
@@ -145,6 +153,24 @@ node dsh-agent.mjs rm review                  # don rac (archive, khoi phuc duoc
 node dsh-agent.mjs host status | host stop
 ```
 
+## Cho người review
+
+Đây là adapter **một chiều**: DSH session đóng vai subagent cho Codex, không phải bản fork của Codex.
+Muốn phản biện nhanh thì đọc theo thứ tự này:
+
+| Muốn kiểm | Xem |
+|---|---|
+| Bộ tool có đúng vocabulary native không | [dsh-agent-mcp.mjs](dsh-agent-mcp.mjs) — đối chiếu với `<multi_agent_role>` in ra bởi `codex debug prompt-input` |
+| Kênh ngược có thật không | [hook-reports.mjs](hook-reports.mjs) + [e2e-real.mjs](e2e-real.mjs) — chạy `node e2e-real.mjs` rồi tự đánh giá |
+| MCP server có hợp lệ không | [mcp-test.mjs](mcp-test.mjs) (nói JSON-RPC thuần qua stdio, không SDK) |
+| Chỗ dễ sai nhất | `envelope()` + watermark `reportedSeq` trong [dsh-web.mjs](dsh-web.mjs): báo cáo chỉ giao **một lần**, ai đọc trước thắng |
+| Chỗ chưa chứng minh | Hook mới chỉ kiểm với **một** event (`UserPromptSubmit`) và một bản Codex (0.155.1); `notifications/progress` không tới model (đã đo); giá trị mặc định `tool_timeout_sec` của Codex chưa xác định |
+| Chỗ cố tình KHÔNG làm | Không fork session (`fork_turns`), không subagent lồng nhau, không streaming, không copy mô hình 4 slot của Codex — xem mục "Học từ native" ở trên |
+
+Nghi ngờ lớn nhất mà người review nên chất vấn: **adapter dựa vào RPC nội bộ của web host DSH**
+(`/api/session/*`), không phải surface có cam kết như `dsh headless`. Nếu DSH đổi shape thì adapter
+hỏng (lỗi hiện rõ dạng `gateway/…`), và đường `--headless` là fallback.
+
 ## Không phải bật gì cả
 
 | Nấc | Khi nào | Làm gì |
@@ -164,7 +190,8 @@ Host tự dựng dùng chung kho session với GUI; `host stop` chỉ tắt host
 | [dsh-agent.mjs](dsh-agent.mjs) | CLI: `new/send/steer/interrupt/stop/wait/reports/history/list/status/host`, runner headless `__run` |
 | [dsh-web.mjs](dsh-web.mjs) | Transport web: tìm/dựng host, token→cookie, `session/*`, `envelope()`, `reports()`, `resolve()` |
 | [hook-reports.mjs](hook-reports.mjs) | Hook `UserPromptSubmit`: bơm báo cáo chưa đọc vào context cha |
-| [hooks.example.json](hooks.example.json) | Mẫu hook để dán vào `~/.codex/hooks.json` |
+| [hook-install.mjs](hook-install.mjs) | Sinh `hooks.json` đúng đường dẫn máy đang chạy (mặc định chỉ in, `--write` mới ghi) |
+| [hooks.example.json](hooks.example.json) | Bản mẫu shape của hook (chỗ `command` để placeholder) |
 | [mcp-test.mjs](mcp-test.mjs) | **Live eval** 8 bước cho tầng MCP (spawn→wait→envelope→hook path→progress→interrupt) |
 | [hook-test.mjs](hook-test.mjs) | **Live eval** kênh ngược: rỗng → envelope → chỉ giao một lần |
 | [e2e-real.mjs](e2e-real.mjs) | **E2E với Codex THẬT**: `CODEX_HOME` tạm (không đụng config của bạn) → Codex gọi MCP của ta → subagent chạy → hook bơm báo cáo vào turn sau |
