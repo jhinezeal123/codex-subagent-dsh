@@ -1,79 +1,79 @@
-# codex-subagent-dsh — DSH session làm subagent cho Codex
+# codex-subagent-dsh â€” DSH session lÃ m subagent cho Codex
 
-Biến **session DSH** (bền, xem lại được trong GUI, sống qua restart Codex) thành subagent gọi được
-từ Codex. Thiết kế **bắt chước đúng bộ tool `multi_agent` native của Codex** để model không phải
-học vocabulary mới, và dùng **hook `UserPromptSubmit`** làm kênh ngược để subagent báo cáo về cha.
+Biáº¿n **session DSH** (bá»n, xem láº¡i Ä‘Æ°á»£c trong GUI, sá»‘ng qua restart Codex) thÃ nh subagent gá»i Ä‘Æ°á»£c
+tá»« Codex. Thiáº¿t káº¿ **báº¯t chÆ°á»›c Ä‘Ãºng bá»™ tool `multi_agent` native cá»§a Codex** Ä‘á»ƒ model khÃ´ng pháº£i
+há»c vocabulary má»›i, vÃ  dÃ¹ng **hook `UserPromptSubmit`** lÃ m kÃªnh ngÆ°á»£c Ä‘á»ƒ subagent bÃ¡o cÃ¡o vá» cha.
 
-Tách riêng khỏi `C:\Users\DELL\dsh-subagents` để cô lập, đóng gói, dễ quản lí.
+Repo Ä‘á»™c láº­p, tá»± chá»©a (khÃ´ng phá»¥ thuá»™c package ngoÃ i, chá»‰ cáº§n Node â‰¥ 20), Ä‘á»ƒ dá»… cÃ´ láº­p vÃ  Ä‘Ã³ng gÃ³i.
 
-## Bộ tool: 7 cái, ánh xạ 1-1 với native
+## Bá»™ tool: 7 cÃ¡i, Ã¡nh xáº¡ 1-1 vá»›i native
 
-| Tool của ta | Native của Codex | Việc |
+| Tool cá»§a ta | Native cá»§a Codex | Viá»‡c |
 |---|---|---|
-| `dsh_subagent_spawn` | `spawn_agent` | Tạo subagent + giao việc đầu, **trả id ngay** (không chờ) |
-| `dsh_subagent_followup` | `followup_task` | Giao việc mới, giữ ngữ cảnh, **mở turn mới** |
-| `dsh_subagent_message` | `send_message` | Nhắn vào turn **đang chạy**, không mở turn mới, không cắt bước đang làm |
-| `dsh_subagent_wait` | `wait_agent` | Chờ tới khi có báo cáo (long-poll, backoff 1→8s) |
-| `dsh_subagent_interrupt` | `interrupt_agent` (+ `close_agent`) | `mode:"turn"` dừng turn · `mode:"agent"` dừng hẳn |
-| `dsh_subagent_list` | `list_agents` | Danh sách + trạng thái · `reports_only:true` = hộp thư báo cáo |
-| `dsh_subagent_history` | *(native không có)* | Đọc lịch sử từng turn/tool call — **lợi thế riêng của DSH** |
+| `dsh_subagent_spawn` | `spawn_agent` | Táº¡o subagent + giao viá»‡c Ä‘áº§u, **tráº£ id ngay** (khÃ´ng chá») |
+| `dsh_subagent_followup` | `followup_task` | Giao viá»‡c má»›i, giá»¯ ngá»¯ cáº£nh, **má»Ÿ turn má»›i** |
+| `dsh_subagent_message` | `send_message` | Nháº¯n vÃ o turn **Ä‘ang cháº¡y**, khÃ´ng má»Ÿ turn má»›i, khÃ´ng cáº¯t bÆ°á»›c Ä‘ang lÃ m |
+| `dsh_subagent_wait` | `wait_agent` | Chá» tá»›i khi cÃ³ bÃ¡o cÃ¡o (long-poll, backoff 1â†’8s) |
+| `dsh_subagent_interrupt` | `interrupt_agent` (+ `close_agent`) | `mode:"turn"` dá»«ng turn Â· `mode:"agent"` dá»«ng háº³n |
+| `dsh_subagent_list` | `list_agents` | Danh sÃ¡ch + tráº¡ng thÃ¡i Â· `reports_only:true` = há»™p thÆ° bÃ¡o cÃ¡o |
+| `dsh_subagent_history` | *(native khÃ´ng cÃ³)* | Äá»c lá»‹ch sá»­ tá»«ng turn/tool call â€” **lá»£i tháº¿ riÃªng cá»§a DSH** |
 
-Mọi tool nhận **id hoặc name** (kể cả dạng `/dsh/<name>`, `/root/<name>`) — giống cách native gọi
-subagent bằng canonical task name. `spawn` trả về cả `agent_id`, `nickname`, `canonical_task_name`,
-`thread_id` theo đúng tên field của native.
+Má»i tool nháº­n **id hoáº·c name** (ká»ƒ cáº£ dáº¡ng `/dsh/<name>`, `/root/<name>`) â€” giá»‘ng cÃ¡ch native gá»i
+subagent báº±ng canonical task name. `spawn` tráº£ vá» cáº£ `agent_id`, `nickname`, `canonical_task_name`,
+`thread_id` theo Ä‘Ãºng tÃªn field cá»§a native.
 
-MCP server còn gửi `instructions` trong `initialize` (bản đồ định tuyến: khi nào dùng native, khi nào
-dùng ta) vì 7 description rời rạc không tạo thành "hệ thống" trong đầu model.
+MCP server cÃ²n gá»­i `instructions` trong `initialize` (báº£n Ä‘á»“ Ä‘á»‹nh tuyáº¿n: khi nÃ o dÃ¹ng native, khi nÃ o
+dÃ¹ng ta) vÃ¬ 7 description rá»i ráº¡c khÃ´ng táº¡o thÃ nh "há»‡ thá»‘ng" trong Ä‘áº§u model.
 
-## Báo cáo về cha: 2 đường, đúng format native
+## BÃ¡o cÃ¡o vá» cha: 2 Ä‘Æ°á»ng, Ä‘Ãºng format native
 
-Format envelope y hệt thứ Codex dạy model đọc cho subagent native:
+Format envelope y há»‡t thá»© Codex dáº¡y model Ä‘á»c cho subagent native:
 
 ```
 Message Type: FINAL_ANSWER
-Task name: <name đặt lúc spawn>
+Task name: <name Ä‘áº·t lÃºc spawn>
 Sender: <session id>
 Payload:
-<câu trả lời cuối>
+<cÃ¢u tráº£ lá»i cuá»‘i>
 ```
 
-| Đường | Cơ chế | Dùng khi |
+| ÄÆ°á»ng | CÆ¡ cháº¿ | DÃ¹ng khi |
 |---|---|---|
-| **Push** (mặc định) | Hook `UserPromptSubmit` gọi `hook-reports.mjs` → bơm `additionalContext` vào turn mới | Cha không muốn chặn; báo cáo tự tới ở turn kế tiếp |
-| **Pull** | `dsh_subagent_wait` → CLI `wait` long-poll → trả envelope | Cha cần kết quả *ngay bây giờ* |
+| **Push** (máº·c Ä‘á»‹nh) | Hook `UserPromptSubmit` gá»i `hook-reports.mjs` â†’ bÆ¡m `additionalContext` vÃ o turn má»›i | Cha khÃ´ng muá»‘n cháº·n; bÃ¡o cÃ¡o tá»± tá»›i á»Ÿ turn káº¿ tiáº¿p |
+| **Pull** | `dsh_subagent_wait` â†’ CLI `wait` long-poll â†’ tráº£ envelope | Cha cáº§n káº¿t quáº£ *ngay bÃ¢y giá»* |
 
-Báo cáo chỉ giao **một lần**: ai đọc trước (hook hay wait) thì đường kia không thấy nữa. Watermark
-`reportedSeq` nằm trong `web-index.json` nên **không cần tiến trình nền** — cha hỏi lúc nào tính lúc đó.
+BÃ¡o cÃ¡o chá»‰ giao **má»™t láº§n**: ai Ä‘á»c trÆ°á»›c (hook hay wait) thÃ¬ Ä‘Æ°á»ng kia khÃ´ng tháº¥y ná»¯a. Watermark
+`reportedSeq` náº±m trong `web-index.json` nÃªn **khÃ´ng cáº§n tiáº¿n trÃ¬nh ná»n** â€” cha há»i lÃºc nÃ o tÃ­nh lÃºc Ä‘Ã³.
 
-Ba kết cục của `wait` phân biệt rõ, không làm tròn thành "thành công":
-`reported` (có báo cáo) · `nothing-new` (không ai còn chạy) · `unconfirmed` (hết giờ, **chưa** xác nhận — exit 3).
+Ba káº¿t cá»¥c cá»§a `wait` phÃ¢n biá»‡t rÃµ, khÃ´ng lÃ m trÃ²n thÃ nh "thÃ nh cÃ´ng":
+`reported` (cÃ³ bÃ¡o cÃ¡o) Â· `nothing-new` (khÃ´ng ai cÃ²n cháº¡y) Â· `unconfirmed` (háº¿t giá», **chÆ°a** xÃ¡c nháº­n â€” exit 3).
 
-## Nối vào Codex (dán tay — repo này KHÔNG tự sửa config của bạn)
+## Ná»‘i vÃ o Codex (dÃ¡n tay â€” repo nÃ y KHÃ”NG tá»± sá»­a config cá»§a báº¡n)
 
-**1. MCP server** — sửa `[mcp_servers.dsh-agent]` trong `~/.codex/config.toml` trỏ về repo mới, và
-thêm `tool_timeout_sec` (mặc định của Codex **không rõ nhưng >150s**, hết hạn là **lỗi cứng + kill
-connection**, nên phải đặt tường minh):
+**1. MCP server** â€” sá»­a `[mcp_servers.dsh-agent]` trong `~/.codex/config.toml` trá» vá» repo má»›i, vÃ 
+thÃªm `tool_timeout_sec` (máº·c Ä‘á»‹nh cá»§a Codex **khÃ´ng rÃµ nhÆ°ng >150s**, háº¿t háº¡n lÃ  **lá»—i cá»©ng + kill
+connection**, nÃªn pháº£i Ä‘áº·t tÆ°á»ng minh):
 
 ```toml
 [mcp_servers.dsh-agent]
 command = 'C:\Program Files\nodejs\node.exe'
-args = ['D:\Documents\codex_subagent_dsh\dsh-agent-mcp.mjs']
+args = ['<REPO>\dsh-agent-mcp.mjs']
 startup_timeout_sec = 60
-tool_timeout_sec = 900                      # 15 phút: đủ cho wait dài, tránh bị kill giữa chừng
-default_tools_approval_mode = "approve"     # không thì approval_policy="never" sẽ chặn tool call
+tool_timeout_sec = 900                      # 15 phÃºt: Ä‘á»§ cho wait dÃ i, trÃ¡nh bá»‹ kill giá»¯a chá»«ng
+default_tools_approval_mode = "approve"     # khÃ´ng thÃ¬ approval_policy="never" sáº½ cháº·n tool call
 ```
 
-**2. Hook kênh ngược** — sinh file hook với đường dẫn đúng máy bạn, rồi **trust** nó (hook chưa trust
-thì Codex không chạy; có `--dangerously-bypass-hook-trust` cho một lần):
+**2. Hook kÃªnh ngÆ°á»£c** â€” sinh file hook vá»›i Ä‘Æ°á»ng dáº«n Ä‘Ãºng mÃ¡y báº¡n, rá»“i **trust** nÃ³ (hook chÆ°a trust
+thÃ¬ Codex khÃ´ng cháº¡y; cÃ³ `--dangerously-bypass-hook-trust` cho má»™t láº§n):
 
 ```powershell
-node hook-install.mjs            # in ra JSON, KHÔNG ghi gì
-node hook-install.mjs --write    # ghi ~/.codex/hooks.json (tự backup bản cũ)
-node hook-install.mjs --project  # hoặc ghi <repo>/.codex/hooks.json
+node hook-install.mjs            # in ra JSON, KHÃ”NG ghi gÃ¬
+node hook-install.mjs --write    # ghi ~/.codex/hooks.json (tá»± backup báº£n cÅ©)
+node hook-install.mjs --project  # hoáº·c ghi <repo>/.codex/hooks.json
 ```
 
-Sau đó mở Codex, gõ `/hooks` để trust. [`hooks.example.json`](hooks.example.json) là bản mẫu chỉ để
-xem shape ([`hook-install.mjs`](hook-install.mjs) sinh ra y hệt, chỉ khác đường dẫn tuyệt đối):
+Sau Ä‘Ã³ má»Ÿ Codex, gÃµ `/hooks` Ä‘á»ƒ trust. [`hooks.example.json`](hooks.example.json) lÃ  báº£n máº«u chá»‰ Ä‘á»ƒ
+xem shape ([`hook-install.mjs`](hook-install.mjs) sinh ra y há»‡t, chá»‰ khÃ¡c Ä‘Æ°á»ng dáº«n tuyá»‡t Ä‘á»‘i):
 
 ```json
 {
@@ -89,57 +89,57 @@ xem shape ([`hook-install.mjs`](hook-install.mjs) sinh ra y hệt, chỉ khác �
 }
 ```
 
-Hợp đồng này lấy từ schema sinh bởi chính Codex
-(`codex-rs/hooks/schema/generated/user-prompt-submit.command.{input,output}.schema.json`): stdin là
+Há»£p Ä‘á»“ng nÃ y láº¥y tá»« schema sinh bá»Ÿi chÃ­nh Codex
+(`codex-rs/hooks/schema/generated/user-prompt-submit.command.{input,output}.schema.json`): stdin lÃ 
 `{cwd, hook_event_name, model, permission_mode, prompt, session_id, transcript_path, turn_id}`, stdout
-nhận `hookSpecificOutput.additionalContext`. Đã đo: hook tự chạy mất **0.23s** khi chưa có báo cáo.
+nháº­n `hookSpecificOutput.additionalContext`. ÄÃ£ Ä‘o: hook tá»± cháº¡y máº¥t **0.23s** khi chÆ°a cÃ³ bÃ¡o cÃ¡o.
 
-**3. (tuỳ chọn) `AGENTS.md`** — vì `multi_agent` của Codex đang bật (`stable true`), Codex sẽ ưu tiên
-subagent của chính nó. Muốn nó chọn ta khi cần session bền, thêm vào `AGENTS.md`:
+**3. (tuá»³ chá»n) `AGENTS.md`** â€” vÃ¬ `multi_agent` cá»§a Codex Ä‘ang báº­t (`stable true`), Codex sáº½ Æ°u tiÃªn
+subagent cá»§a chÃ­nh nÃ³. Muá»‘n nÃ³ chá»n ta khi cáº§n session bá»n, thÃªm vÃ o `AGENTS.md`:
 
 ```md
-Khi cần subagent sống lâu, xem lại được lịch sử, hoặc chạy bằng model khác: dùng MCP tool
-`dsh_subagent_*` thay cho subagent native. Việc ngắn trong phiên thì dùng native.
+Khi cáº§n subagent sá»‘ng lÃ¢u, xem láº¡i Ä‘Æ°á»£c lá»‹ch sá»­, hoáº·c cháº¡y báº±ng model khÃ¡c: dÃ¹ng MCP tool
+`dsh_subagent_*` thay cho subagent native. Viá»‡c ngáº¯n trong phiÃªn thÃ¬ dÃ¹ng native.
 ```
 
-## Số đo thật (không phải suy đoán)
+## Sá»‘ Ä‘o tháº­t (khÃ´ng pháº£i suy Ä‘oÃ¡n)
 
-| Việc | Trước | Sau |
+| Viá»‡c | TrÆ°á»›c | Sau |
 |---|---|---|
-| Hook `UserPromptSubmit` (không có báo cáo) | 5.4s + **crash** `uv\win\async.c` | **0.23s**, exit 0 |
+| Hook `UserPromptSubmit` (khÃ´ng cÃ³ bÃ¡o cÃ¡o) | 5.4s + **crash** `uv\win\async.c` | **0.23s**, exit 0 |
 | `dsh-agent host status` | 5.29s | **0.78s** |
 | `dsh-agent reports --json` | 5.30s | **0.65s** |
-| `dsh-agent list` | 1.97s | 1.97s (host phải quét 158 session — không tránh được) |
-| `session/page` 1 session | 2.0s (kèm `session/list`) | **24-75ms** |
-| `spawn` → `wait` → envelope | — | 6-10s (1 turn thật của model) |
+| `dsh-agent list` | 1.97s | 1.97s (host pháº£i quÃ©t 158 session â€” khÃ´ng trÃ¡nh Ä‘Æ°á»£c) |
+| `session/page` 1 session | 2.0s (kÃ¨m `session/list`) | **24-75ms** |
+| `spawn` â†’ `wait` â†’ envelope | â€” | 6-10s (1 turn tháº­t cá»§a model) |
 
-Hai nguyên nhân gốc đã sửa:
-1. `probe()` gọi `session/list` (host quét cả workspace, 0.5-5s) → đổi sang `session/page` (~75ms,
-   vẫn phân biệt đúng `200` / `401` / host chết).
-2. `readPage()` gọi `one()` → `list()` chỉ để lấy `asOfSeq`; nay lấy cursor từ chính lỗi
-   `"session page through seq N is past cursor M"` mà host trả về (2 RPC × ~30ms thay vì 1 × 2s).
+Hai nguyÃªn nhÃ¢n gá»‘c Ä‘Ã£ sá»­a:
+1. `probe()` gá»i `session/list` (host quÃ©t cáº£ workspace, 0.5-5s) â†’ Ä‘á»•i sang `session/page` (~75ms,
+   váº«n phÃ¢n biá»‡t Ä‘Ãºng `200` / `401` / host cháº¿t).
+2. `readPage()` gá»i `one()` â†’ `list()` chá»‰ Ä‘á»ƒ láº¥y `asOfSeq`; nay láº¥y cursor tá»« chÃ­nh lá»—i
+   `"session page through seq N is past cursor M"` mÃ  host tráº£ vá» (2 RPC Ã— ~30ms thay vÃ¬ 1 Ã— 2s).
 
-Và một bug thật: `process.exit()` sau `fetch` trên Windows làm libuv abort
-(`Assertion failed: !(handle->flags & UV_HANDLE_CLOSING)`) — hook phải dùng `process.exitCode` rồi để
-event loop tự cạn.
+VÃ  má»™t bug tháº­t: `process.exit()` sau `fetch` trÃªn Windows lÃ m libuv abort
+(`Assertion failed: !(handle->flags & UV_HANDLE_CLOSING)`) â€” hook pháº£i dÃ¹ng `process.exitCode` rá»“i Ä‘á»ƒ
+event loop tá»± cáº¡n.
 
-## Học từ native: copy gì, KHÔNG copy gì
+## Há»c tá»« native: copy gÃ¬, KHÃ”NG copy gÃ¬
 
-**Copy:** tên & ngữ nghĩa tool; envelope `FINAL_ANSWER`; `spawn` trả ngay + `wait` chờ dài
-("prefer longer waits (minutes) to avoid busy polling"); `send_message` tách khỏi `followup_task`;
-định danh bằng id **hoặc** tên; khuyến cáo chia việc để mỗi subagent ghi vào **tập file rời nhau**.
+**Copy:** tÃªn & ngá»¯ nghÄ©a tool; envelope `FINAL_ANSWER`; `spawn` tráº£ ngay + `wait` chá» dÃ i
+("prefer longer waits (minutes) to avoid busy polling"); `send_message` tÃ¡ch khá»i `followup_task`;
+Ä‘á»‹nh danh báº±ng id **hoáº·c** tÃªn; khuyáº¿n cÃ¡o chia viá»‡c Ä‘á»ƒ má»—i subagent ghi vÃ o **táº­p file rá»i nhau**.
 
-**Không copy:**
-- **4 concurrency slot** của Codex — DSH chạy ngoài hệ slot đó, không tốn slot nào của Codex.
-- **`fork_turns` full-history** — DSH không có RPC fork session; ta chỉ nhận seed text (`context`).
-- **Subagent lồng nhau** — con của ta không tự spawn con (native mới có).
-- **Streaming realtime** — không có; muốn biết tiến độ thì đọc `history`.
-- **Blocking-by-default** — `spawn` không chờ; `wait` có trần thời gian.
+**KhÃ´ng copy:**
+- **4 concurrency slot** cá»§a Codex â€” DSH cháº¡y ngoÃ i há»‡ slot Ä‘Ã³, khÃ´ng tá»‘n slot nÃ o cá»§a Codex.
+- **`fork_turns` full-history** â€” DSH khÃ´ng cÃ³ RPC fork session; ta chá»‰ nháº­n seed text (`context`).
+- **Subagent lá»“ng nhau** â€” con cá»§a ta khÃ´ng tá»± spawn con (native má»›i cÃ³).
+- **Streaming realtime** â€” khÃ´ng cÃ³; muá»‘n biáº¿t tiáº¿n Ä‘á»™ thÃ¬ Ä‘á»c `history`.
+- **Blocking-by-default** â€” `spawn` khÃ´ng chá»; `wait` cÃ³ tráº§n thá»i gian.
 
-## Dùng tay (CLI)
+## DÃ¹ng tay (CLI)
 
 ```powershell
-node dsh-agent.mjs new "Doc repo nay, tom tat kien truc trong 10 dong" --cwd D:\Documents\myrepo --label review
+node dsh-agent.mjs new "Doc repo nay, tom tat kien truc trong 10 dong" --cwd <REPO> --label review
 node dsh-agent.mjs list
 node dsh-agent.mjs reports                    # bao cao chua doc (envelope native)
 node dsh-agent.mjs reports --peek --json      # chi xem, khong tieu thu
@@ -153,89 +153,89 @@ node dsh-agent.mjs rm review                  # don rac (archive, khoi phuc duoc
 node dsh-agent.mjs host status | host stop
 ```
 
-## Cho người review
+## Cho ngÆ°á»i review
 
-Đây là adapter **một chiều**: DSH session đóng vai subagent cho Codex, không phải bản fork của Codex.
-Muốn phản biện nhanh thì đọc theo thứ tự này:
+ÄÃ¢y lÃ  adapter **má»™t chiá»u**: DSH session Ä‘Ã³ng vai subagent cho Codex, khÃ´ng pháº£i báº£n fork cá»§a Codex.
+Muá»‘n pháº£n biá»‡n nhanh thÃ¬ Ä‘á»c theo thá»© tá»± nÃ y:
 
-| Muốn kiểm | Xem |
+| Muá»‘n kiá»ƒm | Xem |
 |---|---|
-| Bộ tool có đúng vocabulary native không | [dsh-agent-mcp.mjs](dsh-agent-mcp.mjs) — đối chiếu với `<multi_agent_role>` in ra bởi `codex debug prompt-input` |
-| Kênh ngược có thật không | [hook-reports.mjs](hook-reports.mjs) + [e2e-real.mjs](e2e-real.mjs) — chạy `node e2e-real.mjs` rồi tự đánh giá |
-| MCP server có hợp lệ không | [mcp-test.mjs](mcp-test.mjs) (nói JSON-RPC thuần qua stdio, không SDK) |
-| Chỗ dễ sai nhất | `envelope()` + watermark `reportedSeq` trong [dsh-web.mjs](dsh-web.mjs): báo cáo chỉ giao **một lần**, ai đọc trước thắng |
-| Chỗ chưa chứng minh | Hook mới chỉ kiểm với **một** event (`UserPromptSubmit`) và một bản Codex (0.155.1); `notifications/progress` không tới model (đã đo); giá trị mặc định `tool_timeout_sec` của Codex chưa xác định |
-| Chỗ cố tình KHÔNG làm | Không fork session (`fork_turns`), không subagent lồng nhau, không streaming, không copy mô hình 4 slot của Codex — xem mục "Học từ native" ở trên |
+| Bá»™ tool cÃ³ Ä‘Ãºng vocabulary native khÃ´ng | [dsh-agent-mcp.mjs](dsh-agent-mcp.mjs) â€” Ä‘á»‘i chiáº¿u vá»›i `<multi_agent_role>` in ra bá»Ÿi `codex debug prompt-input` |
+| KÃªnh ngÆ°á»£c cÃ³ tháº­t khÃ´ng | [hook-reports.mjs](hook-reports.mjs) + [e2e-real.mjs](e2e-real.mjs) â€” cháº¡y `node e2e-real.mjs` rá»“i tá»± Ä‘Ã¡nh giÃ¡ |
+| MCP server cÃ³ há»£p lá»‡ khÃ´ng | [mcp-test.mjs](mcp-test.mjs) (nÃ³i JSON-RPC thuáº§n qua stdio, khÃ´ng SDK) |
+| Chá»— dá»… sai nháº¥t | `envelope()` + watermark `reportedSeq` trong [dsh-web.mjs](dsh-web.mjs): bÃ¡o cÃ¡o chá»‰ giao **má»™t láº§n**, ai Ä‘á»c trÆ°á»›c tháº¯ng |
+| Chá»— chÆ°a chá»©ng minh | Hook má»›i chá»‰ kiá»ƒm vá»›i **má»™t** event (`UserPromptSubmit`) vÃ  má»™t báº£n Codex (0.155.1); `notifications/progress` khÃ´ng tá»›i model (Ä‘Ã£ Ä‘o); giÃ¡ trá»‹ máº·c Ä‘á»‹nh `tool_timeout_sec` cá»§a Codex chÆ°a xÃ¡c Ä‘á»‹nh |
+| Chá»— cá»‘ tÃ¬nh KHÃ”NG lÃ m | KhÃ´ng fork session (`fork_turns`), khÃ´ng subagent lá»“ng nhau, khÃ´ng streaming, khÃ´ng copy mÃ´ hÃ¬nh 4 slot cá»§a Codex â€” xem má»¥c "Há»c tá»« native" á»Ÿ trÃªn |
 
-Nghi ngờ lớn nhất mà người review nên chất vấn: **adapter dựa vào RPC nội bộ của web host DSH**
-(`/api/session/*`), không phải surface có cam kết như `dsh headless`. Nếu DSH đổi shape thì adapter
-hỏng (lỗi hiện rõ dạng `gateway/…`), và đường `--headless` là fallback.
+Nghi ngá» lá»›n nháº¥t mÃ  ngÆ°á»i review nÃªn cháº¥t váº¥n: **adapter dá»±a vÃ o RPC ná»™i bá»™ cá»§a web host DSH**
+(`/api/session/*`), khÃ´ng pháº£i surface cÃ³ cam káº¿t nhÆ° `dsh headless`. Náº¿u DSH Ä‘á»•i shape thÃ¬ adapter
+há»ng (lá»—i hiá»‡n rÃµ dáº¡ng `gateway/â€¦`), vÃ  Ä‘Æ°á»ng `--headless` lÃ  fallback.
 
-## Không phải bật gì cả
+## KhÃ´ng pháº£i báº­t gÃ¬ cáº£
 
-| Nấc | Khi nào | Làm gì |
+| Náº¥c | Khi nÃ o | LÃ m gÃ¬ |
 |---|---|---|
-| 1 | Bình thường | Dùng **cookie đã lưu** (`.web-cookie`) nói chuyện với GUI đang mở; cookie sống 30 ngày, qua cả restart GUI |
-| 2 | Chưa có cookie | Đọc token `.web-token` (hoặc `$DSH_WEB_TOKEN`) → đổi cookie → lưu lại |
-| 3 | Không host nào sống | **Tự dựng host riêng** (`dsh web --no-open --port 0`) và tự bắt token từ stdout — như bạn đọc token trên màn hình, chỉ khác là máy đọc hộ |
+| 1 | BÃ¬nh thÆ°á»ng | DÃ¹ng **cookie Ä‘Ã£ lÆ°u** (`.web-cookie`) nÃ³i chuyá»‡n vá»›i GUI Ä‘ang má»Ÿ; cookie sá»‘ng 30 ngÃ y, qua cáº£ restart GUI |
+| 2 | ChÆ°a cÃ³ cookie | Äá»c token `.web-token` (hoáº·c `$DSH_WEB_TOKEN`) â†’ Ä‘á»•i cookie â†’ lÆ°u láº¡i |
+| 3 | KhÃ´ng host nÃ o sá»‘ng | **Tá»± dá»±ng host riÃªng** (`dsh web --no-open --port 0`) vÃ  tá»± báº¯t token tá»« stdout â€” nhÆ° báº¡n Ä‘á»c token trÃªn mÃ n hÃ¬nh, chá»‰ khÃ¡c lÃ  mÃ¡y Ä‘á»c há»™ |
 
-Host tự dựng dùng chung kho session với GUI; `host stop` chỉ tắt host **do tool dựng**, không bao giờ
-đụng GUI bạn tự mở. Hai lệnh chạy song song không dựng 2 host (khoá `.web-host.json.lock`).
+Host tá»± dá»±ng dÃ¹ng chung kho session vá»›i GUI; `host stop` chá»‰ táº¯t host **do tool dá»±ng**, khÃ´ng bao giá»
+Ä‘á»¥ng GUI báº¡n tá»± má»Ÿ. Hai lá»‡nh cháº¡y song song khÃ´ng dá»±ng 2 host (khoÃ¡ `.web-host.json.lock`).
 
 ## File
 
-| File | Vai trò |
+| File | Vai trÃ² |
 |---|---|
 | [dsh-agent-mcp.mjs](dsh-agent-mcp.mjs) | MCP server stdio: 7 tool + `instructions` + `notifications/progress` |
 | [dsh-agent.mjs](dsh-agent.mjs) | CLI: `new/send/steer/interrupt/stop/wait/reports/history/list/status/host`, runner headless `__run` |
-| [dsh-web.mjs](dsh-web.mjs) | Transport web: tìm/dựng host, token→cookie, `session/*`, `envelope()`, `reports()`, `resolve()` |
-| [hook-reports.mjs](hook-reports.mjs) | Hook `UserPromptSubmit`: bơm báo cáo chưa đọc vào context cha |
-| [hook-install.mjs](hook-install.mjs) | Sinh `hooks.json` đúng đường dẫn máy đang chạy (mặc định chỉ in, `--write` mới ghi) |
-| [hooks.example.json](hooks.example.json) | Bản mẫu shape của hook (chỗ `command` để placeholder) |
-| [mcp-test.mjs](mcp-test.mjs) | **Live eval** 8 bước cho tầng MCP (spawn→wait→envelope→hook path→progress→interrupt) |
-| [hook-test.mjs](hook-test.mjs) | **Live eval** kênh ngược: rỗng → envelope → chỉ giao một lần |
-| [e2e-real.mjs](e2e-real.mjs) | **E2E với Codex THẬT**: `CODEX_HOME` tạm (không đụng config của bạn) → Codex gọi MCP của ta → subagent chạy → hook bơm báo cáo vào turn sau |
-| [web-e2e-test.mjs](web-e2e-test.mjs), [web-steer-test.mjs](web-steer-test.mjs), [web-cancel-test.mjs](web-cancel-test.mjs), [web-ops-test.mjs](web-ops-test.mjs) | E2E cũ: new→steer→history→rm, steer giữa turn, cancel, 3 thao tác chen ngang |
-| `.web-cookie`, `.web-token`, `.web-host.json*` | Trạng thái host/cookie (**đừng chia sẻ, đã gitignore**) |
-| `%DSH_HOME%\agents\web-index.json` | Nhớ subagent nào do tool tạo + watermark báo cáo |
+| [dsh-web.mjs](dsh-web.mjs) | Transport web: tÃ¬m/dá»±ng host, tokenâ†’cookie, `session/*`, `envelope()`, `reports()`, `resolve()` |
+| [hook-reports.mjs](hook-reports.mjs) | Hook `UserPromptSubmit`: bÆ¡m bÃ¡o cÃ¡o chÆ°a Ä‘á»c vÃ o context cha |
+| [hook-install.mjs](hook-install.mjs) | Sinh `hooks.json` Ä‘Ãºng Ä‘Æ°á»ng dáº«n mÃ¡y Ä‘ang cháº¡y (máº·c Ä‘á»‹nh chá»‰ in, `--write` má»›i ghi) |
+| [hooks.example.json](hooks.example.json) | Báº£n máº«u shape cá»§a hook (chá»— `command` Ä‘á»ƒ placeholder) |
+| [mcp-test.mjs](mcp-test.mjs) | **Live eval** 8 bÆ°á»›c cho táº§ng MCP (spawnâ†’waitâ†’envelopeâ†’hook pathâ†’progressâ†’interrupt) |
+| [hook-test.mjs](hook-test.mjs) | **Live eval** kÃªnh ngÆ°á»£c: rá»—ng â†’ envelope â†’ chá»‰ giao má»™t láº§n |
+| [e2e-real.mjs](e2e-real.mjs) | **E2E vá»›i Codex THáº¬T**: `CODEX_HOME` táº¡m (khÃ´ng Ä‘á»¥ng config cá»§a báº¡n) â†’ Codex gá»i MCP cá»§a ta â†’ subagent cháº¡y â†’ hook bÆ¡m bÃ¡o cÃ¡o vÃ o turn sau |
+| [web-e2e-test.mjs](web-e2e-test.mjs), [web-steer-test.mjs](web-steer-test.mjs), [web-cancel-test.mjs](web-cancel-test.mjs), [web-ops-test.mjs](web-ops-test.mjs) | E2E cÅ©: newâ†’steerâ†’historyâ†’rm, steer giá»¯a turn, cancel, 3 thao tÃ¡c chen ngang |
+| `.web-cookie`, `.web-token`, `.web-host.json*` | Tráº¡ng thÃ¡i host/cookie (**Ä‘á»«ng chia sáº», Ä‘Ã£ gitignore**) |
+| `%DSH_HOME%\agents\web-index.json` | Nhá»› subagent nÃ o do tool táº¡o + watermark bÃ¡o cÃ¡o |
 
-## Biến môi trường
+## Biáº¿n mÃ´i trÆ°á»ng
 
-| Biến | Mặc định | Ý nghĩa |
+| Biáº¿n | Máº·c Ä‘á»‹nh | Ã nghÄ©a |
 |---|---|---|
-| `DSH_WEB_BASE` | `http://127.0.0.1:3080` | Ưu tiên host ở địa chỉ này |
-| `DSH_WEB_TOKEN` | — | Token, thay cho file `.web-token` |
-| `DSH_AGENTS_HOME` | `%DSH_HOME%\agents` | Nơi lưu index + trạng thái headless |
-| `DSH_BIN` | tự dò bản `@deepseek-ai/dsh` mới nhất trên đĩa | Ghim `lib/bin.js` |
-| `DSH_MCP_PROGRESS_MS` | `10000` | Nhịp progress notification (test hạ xuống 500) |
+| `DSH_WEB_BASE` | `http://127.0.0.1:3080` | Æ¯u tiÃªn host á»Ÿ Ä‘á»‹a chá»‰ nÃ y |
+| `DSH_WEB_TOKEN` | â€” | Token, thay cho file `.web-token` |
+| `DSH_AGENTS_HOME` | `%DSH_HOME%\agents` | NÆ¡i lÆ°u index + tráº¡ng thÃ¡i headless |
+| `DSH_BIN` | tá»± dÃ² báº£n `@deepseek-ai/dsh` má»›i nháº¥t trÃªn Ä‘Ä©a | Ghim `lib/bin.js` |
+| `DSH_MCP_PROGRESS_MS` | `10000` | Nhá»‹p progress notification (test háº¡ xuá»‘ng 500) |
 
-## Giới hạn đã biết
+## Giá»›i háº¡n Ä‘Ã£ biáº¿t
 
-- **`notifications/progress` không tới model** (đo được: Codex gửi `progressToken`, UI hiện tiến độ,
-  nhưng model không thấy gì). Đừng thiết kế luồng nghiệp vụ dựa vào nó — muốn báo tiến độ thì viết
-  vào câu trả lời.
-- `wait` quá ~2 phút chỉ nên dùng khi đã đặt `tool_timeout_sec`; hết hạn tool call = lỗi cứng, mất kết quả.
-- `session/list` chậm dần theo số session (158 session → ~2s). `list`/`wait`/`status` đều đi qua nó;
-  đường đọc báo cáo thì không.
-- `steer` không cắt bước đang chạy (đúng thiết kế): tool call đang chạy vẫn xong, agent đổi hướng ở
-  bước kế tiếp. Muốn cắt ngay thì `interrupt`.
-- `rm` = **archive** (mềm). Xoá cứng thì xoá `%DSH_HOME%\sessions\<slug>\<id>\` khi host đã tắt.
-- API web là **RPC nội bộ của host**, không phải surface có cam kết như `dsh headless`; DSH đổi shape
-  thì lỗi hiện rõ (`gateway/…`) và vẫn còn đường `--headless`.
-- Hook `additionalContext` bị "spill" ra đĩa nếu vượt ngưỡng token (`null` = 2500; ta đặt
-  `additionalContextLimit: 0` = không spill, và tự cắt mỗi báo cáo ở 4000 ký tự).
+- **`notifications/progress` khÃ´ng tá»›i model** (Ä‘o Ä‘Æ°á»£c: Codex gá»­i `progressToken`, UI hiá»‡n tiáº¿n Ä‘á»™,
+  nhÆ°ng model khÃ´ng tháº¥y gÃ¬). Äá»«ng thiáº¿t káº¿ luá»“ng nghiá»‡p vá»¥ dá»±a vÃ o nÃ³ â€” muá»‘n bÃ¡o tiáº¿n Ä‘á»™ thÃ¬ viáº¿t
+  vÃ o cÃ¢u tráº£ lá»i.
+- `wait` quÃ¡ ~2 phÃºt chá»‰ nÃªn dÃ¹ng khi Ä‘Ã£ Ä‘áº·t `tool_timeout_sec`; háº¿t háº¡n tool call = lá»—i cá»©ng, máº¥t káº¿t quáº£.
+- `session/list` cháº­m dáº§n theo sá»‘ session (158 session â†’ ~2s). `list`/`wait`/`status` Ä‘á»u Ä‘i qua nÃ³;
+  Ä‘Æ°á»ng Ä‘á»c bÃ¡o cÃ¡o thÃ¬ khÃ´ng.
+- `steer` khÃ´ng cáº¯t bÆ°á»›c Ä‘ang cháº¡y (Ä‘Ãºng thiáº¿t káº¿): tool call Ä‘ang cháº¡y váº«n xong, agent Ä‘á»•i hÆ°á»›ng á»Ÿ
+  bÆ°á»›c káº¿ tiáº¿p. Muá»‘n cáº¯t ngay thÃ¬ `interrupt`.
+- `rm` = **archive** (má»m). XoÃ¡ cá»©ng thÃ¬ xoÃ¡ `%DSH_HOME%\sessions\<slug>\<id>\` khi host Ä‘Ã£ táº¯t.
+- API web lÃ  **RPC ná»™i bá»™ cá»§a host**, khÃ´ng pháº£i surface cÃ³ cam káº¿t nhÆ° `dsh headless`; DSH Ä‘á»•i shape
+  thÃ¬ lá»—i hiá»‡n rÃµ (`gateway/â€¦`) vÃ  váº«n cÃ²n Ä‘Æ°á»ng `--headless`.
+- Hook `additionalContext` bá»‹ "spill" ra Ä‘Ä©a náº¿u vÆ°á»£t ngÆ°á»¡ng token (`null` = 2500; ta Ä‘áº·t
+  `additionalContextLimit: 0` = khÃ´ng spill, vÃ  tá»± cáº¯t má»—i bÃ¡o cÃ¡o á»Ÿ 4000 kÃ½ tá»±).
 
-## Tự kiểm tra
+## Tá»± kiá»ƒm tra
 
 ```powershell
-node dsh-agent.mjs selftest     # đơn vị: so version, cửa sổ limit/offset, render lịch sử, answerFrom
-node mcp-test.mjs               # live eval 8 bước (spawn thật, wait thật, hook path, progress, interrupt)
-node hook-test.mjs              # live eval kênh ngược (payload stdin giả đúng schema Codex)
-node e2e-real.mjs               # E2E với Codex thật trong CODEX_HOME tạm (3 phép kiểm, tự dọn)
+node dsh-agent.mjs selftest     # Ä‘Æ¡n vá»‹: so version, cá»­a sá»• limit/offset, render lá»‹ch sá»­, answerFrom
+node mcp-test.mjs               # live eval 8 bÆ°á»›c (spawn tháº­t, wait tháº­t, hook path, progress, interrupt)
+node hook-test.mjs              # live eval kÃªnh ngÆ°á»£c (payload stdin giáº£ Ä‘Ãºng schema Codex)
+node e2e-real.mjs               # E2E vá»›i Codex tháº­t trong CODEX_HOME táº¡m (3 phÃ©p kiá»ƒm, tá»± dá»n)
 node web-e2e-test.mjs           # new -> steer giua chung -> history -> rm
 ```
 
-Kết quả E2E thật (`e2e-real.mjs`, chạy trên máy này):
+Káº¿t quáº£ E2E tháº­t (`e2e-real.mjs`, cháº¡y trÃªn mÃ¡y nÃ y):
 
 ```
 1. Codex goi duoc MCP tool cua ta : PASS
@@ -243,12 +243,12 @@ Kết quả E2E thật (`e2e-real.mjs`, chạy trên máy này):
 3. Hook bom envelope vao turn 2   : PASS (thay so 6 chu so chi subagent biet)
 ```
 
-Phép kiểm thứ 3 được làm chặt: subagent tự sinh một số 6 chữ số rồi trả về, Codex ở turn sau phải in
-lại **nguyên văn envelope kèm đúng con số đó** — thứ duy nhất nó không thể biết nếu hook không bơm.
+PhÃ©p kiá»ƒm thá»© 3 Ä‘Æ°á»£c lÃ m cháº·t: subagent tá»± sinh má»™t sá»‘ 6 chá»¯ sá»‘ rá»“i tráº£ vá», Codex á»Ÿ turn sau pháº£i in
+láº¡i **nguyÃªn vÄƒn envelope kÃ¨m Ä‘Ãºng con sá»‘ Ä‘Ã³** â€” thá»© duy nháº¥t nÃ³ khÃ´ng thá»ƒ biáº¿t náº¿u hook khÃ´ng bÆ¡m.
 
-## Nguồn (đã đọc trực tiếp)
+## Nguá»“n (Ä‘Ã£ Ä‘á»c trá»±c tiáº¿p)
 
 - Subagents: <https://learn.chatgpt.com/docs/agent-configuration/subagents.md>
-- Hooks: <https://learn.chatgpt.com/docs/hooks.md> · schema: `codex-rs/hooks/schema/generated/`
-- Prompt thật model thấy: `codex debug prompt-input` (block `<multi_agent_role>`, 2429 ký tự)
+- Hooks: <https://learn.chatgpt.com/docs/hooks.md> Â· schema: `codex-rs/hooks/schema/generated/`
+- Prompt tháº­t model tháº¥y: `codex debug prompt-input` (block `<multi_agent_role>`, 2429 kÃ½ tá»±)
 - Protocol: `codex app-server generate-json-schema --out <DIR>`
