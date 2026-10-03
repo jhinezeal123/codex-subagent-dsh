@@ -1,0 +1,8 @@
+# state & credential cua adapter (khong bao gio commit)
+.web-token
+.web-cookie
+.web-host.json
+.web-host.json.lock
+.web-host.log
+*.log
+node_modules/
