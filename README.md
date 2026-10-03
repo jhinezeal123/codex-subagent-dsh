@@ -167,6 +167,7 @@ Host tự dựng dùng chung kho session với GUI; `host stop` chỉ tắt host
 | [hooks.example.json](hooks.example.json) | Mẫu hook để dán vào `~/.codex/hooks.json` |
 | [mcp-test.mjs](mcp-test.mjs) | **Live eval** 8 bước cho tầng MCP (spawn→wait→envelope→hook path→progress→interrupt) |
 | [hook-test.mjs](hook-test.mjs) | **Live eval** kênh ngược: rỗng → envelope → chỉ giao một lần |
+| [e2e-real.mjs](e2e-real.mjs) | **E2E với Codex THẬT**: `CODEX_HOME` tạm (không đụng config của bạn) → Codex gọi MCP của ta → subagent chạy → hook bơm báo cáo vào turn sau |
 | [web-e2e-test.mjs](web-e2e-test.mjs), [web-steer-test.mjs](web-steer-test.mjs), [web-cancel-test.mjs](web-cancel-test.mjs), [web-ops-test.mjs](web-ops-test.mjs) | E2E cũ: new→steer→history→rm, steer giữa turn, cancel, 3 thao tác chen ngang |
 | `.web-cookie`, `.web-token`, `.web-host.json*` | Trạng thái host/cookie (**đừng chia sẻ, đã gitignore**) |
 | `%DSH_HOME%\agents\web-index.json` | Nhớ subagent nào do tool tạo + watermark báo cáo |
@@ -203,8 +204,20 @@ Host tự dựng dùng chung kho session với GUI; `host stop` chỉ tắt host
 node dsh-agent.mjs selftest     # đơn vị: so version, cửa sổ limit/offset, render lịch sử, answerFrom
 node mcp-test.mjs               # live eval 8 bước (spawn thật, wait thật, hook path, progress, interrupt)
 node hook-test.mjs              # live eval kênh ngược (payload stdin giả đúng schema Codex)
+node e2e-real.mjs               # E2E với Codex thật trong CODEX_HOME tạm (3 phép kiểm, tự dọn)
 node web-e2e-test.mjs           # new -> steer giua chung -> history -> rm
 ```
+
+Kết quả E2E thật (`e2e-real.mjs`, chạy trên máy này):
+
+```
+1. Codex goi duoc MCP tool cua ta : PASS
+2. Subagent DSH chay that         : PASS
+3. Hook bom envelope vao turn 2   : PASS (thay so 6 chu so chi subagent biet)
+```
+
+Phép kiểm thứ 3 được làm chặt: subagent tự sinh một số 6 chữ số rồi trả về, Codex ở turn sau phải in
+lại **nguyên văn envelope kèm đúng con số đó** — thứ duy nhất nó không thể biết nếu hook không bơm.
 
 ## Nguồn (đã đọc trực tiếp)
 
