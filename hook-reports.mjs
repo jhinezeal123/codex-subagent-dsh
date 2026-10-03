@@ -44,14 +44,13 @@ async function run() {
   try {
     if (entries().length === 0) return; // chưa giao việc cho subagent nào
     if (!(await up({ autoStart: false, fast: true }))) return; // hook không được dựng host
-    const rows = await reports({ markRead: true });
+    const rows = await reports({ markRead: true, limit: MAX_REPORTS });
     if (!rows.length) return;
     const text = rows
-      .slice(0, MAX_REPORTS)
       .map((r) => envelope(r))
       .map((t) => (t.length > MAX_CHARS ? `${t.slice(0, MAX_CHARS)}\n…(cat bot)` : t))
       .join('\n\n');
-    const more = rows.length > MAX_REPORTS ? `\n\n(con ${rows.length - MAX_REPORTS} bao cao nua — goi dsh_subagent_list voi reports_only=true)` : '';
+    const more = rows.length === MAX_REPORTS ? '\n\n(co the con bao cao — goi dsh_subagent_list voi reports_only=true)' : '';
     process.stdout.write(JSON.stringify({
       hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: `${text}${more}` },
     }));

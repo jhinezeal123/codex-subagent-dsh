@@ -270,10 +270,9 @@ async function cmdNew(opts) {
 }
 
 async function printWait(id, sessionId) {
-  if (!sessionId && !readMeta(id).sessionId) { console.log(JSON.stringify(readMeta(id), null, 2)); return; }
   // Chờ runner ghi xong sổ sách (pid=null), không chỉ chờ process chết — nếu không
   // sẽ đọc phải meta cũ và in nhầm status "dead"/exit null.
-  const meta = await waitFor(id, (m) => m.pid === null, TASK_TIMEOUT_MS);
+  const meta = await waitFor(id, (m) => m.pid === null && m.status !== 'starting', TASK_TIMEOUT_MS);
   const final = lastFinal(id);
   console.log(JSON.stringify({ id, status: statusOf(meta), exit: meta.runs.at(-1)?.exit ?? null }, null, 2));
   if (final) console.log(final);

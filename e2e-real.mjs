@@ -17,14 +17,13 @@ import { fileURLToPath } from 'node:url';
 
 const REPO = path.dirname(fileURLToPath(import.meta.url));
 const CLI = path.join(REPO, 'dsh-agent.mjs');
-const E2E = path.join(os.tmpdir(), 'codex-e2e-dsh');
-const WORK = path.join(os.tmpdir(), 'codex-e2e-work');
-const CODEX = 'C:\\Users\\DELL\\AppData\\Local\\OpenAI\\Codex\\bin\\a51e250fa15c740a\\codex.exe';
+const E2E = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-e2e-dsh-'));
+const WORK = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-e2e-work-'));
+const AGENTS = path.join(E2E, 'agents');
+const CODEX = process.env.CODEX_BIN || 'C:\\Users\\DELL\\AppData\\Local\\OpenAI\\Codex\\bin\\a51e250fa15c740a\\codex.exe';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ------------------------------------------------------------------ dÃ¡Â»Â±ng nhÃƒÂ  tÃ¡ÂºÂ¡m
-fs.rmSync(E2E, { recursive: true, force: true });
-fs.rmSync(WORK, { recursive: true, force: true });
 fs.mkdirSync(E2E, { recursive: true });
 fs.mkdirSync(WORK, { recursive: true });
 fs.copyFileSync(path.join(os.homedir(), '.codex', 'auth.json'), path.join(E2E, 'auth.json'));
@@ -33,11 +32,13 @@ fs.writeFileSync(path.join(E2E, 'config.toml'), [
   'sandbox_mode = "danger-full-access"',
   '',
   '[mcp_servers.dsh-agent]',
-  "command = 'C:\\Program Files\\nodejs\\node.exe'",
+  `command = '${process.execPath}'`,
   `args = ['${path.join(REPO, 'dsh-agent-mcp.mjs')}']`,
   'startup_timeout_sec = 60',
   'tool_timeout_sec = 900',
   'default_tools_approval_mode = "approve"',
+  '[mcp_servers.dsh-agent.env]',
+  `DSH_AGENTS_HOME = '${AGENTS}'`,
   '',
 ].join('\n'));
 fs.writeFileSync(path.join(E2E, 'hooks.json'), JSON.stringify({
@@ -57,11 +58,11 @@ fs.writeFileSync(path.join(E2E, 'hooks.json'), JSON.stringify({
 }, null, 2));
 console.log(`CODEX_HOME tam: ${E2E}`);
 
-const env = { ...process.env, CODEX_HOME: E2E };
+const env = { ...process.env, CODEX_HOME: E2E, DSH_AGENTS_HOME: AGENTS };
 // cwd = WORK (resume KHONG nhan -C), va phai co --skip-git-repo-check vi WORK khong
 // phai git repo (Codex tu choi chay trong thu muc khong tin cay).
 const runCodex = (args, input) => spawnSync(CODEX, args, { input, env, encoding: 'utf8', cwd: WORK, maxBuffer: 64 * 1024 * 1024, windowsHide: true });
-const runCli = (args) => spawnSync(process.execPath, [CLI, ...args], { encoding: 'utf8', windowsHide: true });
+const runCli = (args) => spawnSync(process.execPath, [CLI, ...args], { env, encoding: 'utf8', windowsHide: true });
 
 // ------------------------------------------------------------------ turn 1
 console.log('\n### TURN 1: Codex that goi MCP tool cua ta');
@@ -76,9 +77,11 @@ if (!calledMcp) console.log(o1.slice(-2500));
 // ------------------------------------------------------------------ chÃ¡Â»Â subagent xong
 console.log('\n### cho subagent xong (peek)');
 let reportSeen = false;
+let secret = null;
 for (let i = 0; i < 60; i += 1) {
   const r = runCli(['reports', '--json', '--peek']);
-  if (/"answer":\s*"\d{6}"/.test(r.stdout ?? '') || /\b\d{6}\b/.test(r.stdout ?? '')) { reportSeen = true; console.log(`co bao cao so ngau nhien sau ~${i * 3}s`); break; }
+  const report = JSON.parse(r.stdout || '{}').reports?.find((item) => item.id === sid);
+  if (/^\d{6}$/.test(report?.answer ?? '')) { secret = report.answer; reportSeen = true; console.log(`co bao cao so ngau nhien sau ~${i * 3}s`); break; }
   await sleep(3000);
 }
 if (!reportSeen) console.log('KHONG thay bao cao so ngau nhien trong hang doi');
@@ -92,11 +95,12 @@ const o2 = `${t2.stdout ?? ''}${t2.stderr ?? ''}`;
 // náº±m ngay sau tiá»n tá»‘ `n` Ä‘Ã³ -> `\b\d{6}\b` KHÃ”NG khá»›p (n vÃ  2 Ä‘á»u lÃ  word char).
 // BÃ¡m Ä‘Ãºng cáº¥u trÃºc: envelope + sá»‘ ngay sau "Payload:".
 const sawEnvelope = /Message Type: FINAL_ANSWER/.test(o2);
-const sawSecret = /Payload:(?:\\n|\s|\\)*(\d{6})/.test(o2);
+const receivedSecret = /Payload:(?:\\n|\s|\\)*(\d{6})/.exec(o2)?.[1];
+const sawSecret = secret !== null && receivedSecret === secret;
 
 console.log('\n### KET QUA');
 console.log(`1. Codex goi duoc MCP tool cua ta : ${calledMcp ? 'PASS' : 'FAIL'}`);
-console.log(`2. Subagent DSH chay that        : ${reportSeen || sid ? 'PASS' : 'FAIL'}`);
+console.log(`2. Subagent DSH chay that        : ${reportSeen ? 'PASS' : 'FAIL'}`);
 console.log(`3. Hook bom envelope vao turn 2  : ${sawEnvelope && sawSecret ? 'PASS' : 'FAIL'}${sawSecret ? ' (thay so 6 chu so chi subagent biet)' : ''}`);
 if (!(sawEnvelope && sawSecret)) console.log(o2.slice(-2000));
 
@@ -105,4 +109,4 @@ if (sid) console.log(`\ndon dep: ${JSON.stringify(runCli(['rm', sid]).stdout?.tr
 fs.rmSync(E2E, { recursive: true, force: true });
 fs.rmSync(WORK, { recursive: true, force: true });
 console.log('da xoa CODEX_HOME tam va thu muc lam viec');
-process.exitCode = calledMcp && sawEnvelope && sawSecret ? 0 : 1;
+process.exitCode = t1.status === 0 && t2.status === 0 && calledMcp && reportSeen && sawEnvelope && sawSecret ? 0 : 1;
